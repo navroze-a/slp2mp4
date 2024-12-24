@@ -2,6 +2,7 @@
 import os, sys, json, subprocess, time, shutil, uuid, multiprocessing, glob
 import argparse
 import tempfile
+from timeit import default_timer as timer
 from pathlib import Path
 from collections import namedtuple
 
@@ -16,7 +17,8 @@ from ffmpegrunner import FfmpegRunner
 
 FPS = 60
 MIN_GAME_LENGTH = 30 * FPS
-DURATION_BUFFER = 200              # Record for 200 additional frames (prevents death cutoffs in merge)
+DURATION_BUFFER = 180              # Record for 180 additional frames
+DEBUG = False           # TODO: add as optional arg
 
 ###############################################################################
 # Misc utils
@@ -32,7 +34,7 @@ def is_game_too_short(num_frames, remove_short):
 
 def get_num_processes(conf):
     if conf.parallel_games == "recommended":
-        return psutil.cpu_count(logical=False)
+        return psutil.cpu_count(logical=False)/2
     else:
         return int(conf.parallel_games)
 
@@ -63,7 +65,6 @@ def record_file_slp(slp_file, outfile, conf):
     with tempfile.TemporaryDirectory() as tmpdir:
         with DolphinRunner(conf, conf.paths, tmpdir, uuid.uuid4()) as dolphin_runner:
             video_file, audio_file = dolphin_runner.run(slp_file, num_frames)
-            print("\nINFO :: FINISHED DOING DOLPHIN RUNNER FOR SLP: ", slp_file, "\n")
             # Encode
             ffmpeg_runner = FfmpegRunner(conf.ffmpeg)
             ffmpeg_runner.run(video_file, audio_file, outfile)
@@ -71,7 +72,7 @@ def record_file_slp(slp_file, outfile, conf):
             if conf.remove_slps:
                 safe_remove_file(slp_file)
 
-            print('\nINFO :: Created {}\n'.format(outfile))
+            print('\nINFO ::: Created {}\n'.format(outfile))
 
 def combine(mp4s, out, conf):
     # Creates concat file
@@ -123,16 +124,16 @@ def record_files(infiles, outdir, conf):
                     parent,
                     os.path.relpath(subdir, infile)
                 )
-                # Replace backslashes with forward slashes
+                # Replace backslashes with forward slashes for windows
                 cur_outdir = cur_outdir.replace(os.sep, '/')
                 print("cur_outdir=", cur_outdir)
                 cur_combine = [] # list of mp4s to be made in curr subdir
                 for f in fs:
                     if not is_slp(f):
                         continue
-                    mp4_name = os.path.join(cur_outdir, get_mp4_name(f))
+                    mp4_name = os.path.join(cur_outdir, get_mp4_name(f)).replace(os.sep, '/')
                     # put (.slp, .mp4, conf) into a tuple (to be sent as args later)
-                    file_mappings.append(SlpMp4Obj(os.path.join(subdir, f), mp4_name, conf))
+                    file_mappings.append(SlpMp4Obj(os.path.join(subdir, f).replace(os.sep, '/'), mp4_name, conf))
                     cur_combine.append(mp4_name)
 
                 # Skips empty directories
@@ -149,17 +150,35 @@ def record_files(infiles, outdir, conf):
                 if len(Path(cur_outdir).parts):
                     idx = 0
 
-                final_mp4_name = '-'.join(Path(cur_outdir).parts[idx:]) + '.mp4'
-                to_combine.append(ToCombineObj(cur_combine, os.path.join(outdir, final_mp4_name)))
+                # final_mp4_name = '-'.join(Path(cur_outdir).parts[-1]) + '.mp4'
+                final_mp4_name = Path(cur_outdir).parts[-1] + '.mp4'
+                to_combine.append(ToCombineObj(cur_combine, os.path.join(outdir, final_mp4_name).replace(os.sep, '/')))
 
     if len(individual_mp4s) > 0:
         to_combine.append(ToCombineObj(individual_mp4s, os.path.join(outdir, 'out.mp4')))
 
+
+    if (DEBUG == True):
+        for file_mapping in file_mappings:
+            print(file_mapping)
+
+        for to_combine_obj in to_combine:
+            print(to_combine_obj)
+
+        print("DEBUG ::: exiting before starting dolphin")
+        exit(0)
+
+
     # Records mp4s
     num_processes = get_num_processes(conf)
     pool = multiprocessing.Pool(processes=num_processes)
+    startProcessTime = timer()
     pool.starmap(catch_err, [(record_file_slp, *args) for args in file_mappings])
     pool.close()
+    endProcessTime = timer()
+    print("INFO ::: TOOK ", endProcessTime-startProcessTime, " seconds to process all ", len(file_mappings) ," slps to mp4")
+    print("INFO ::: INITIATING COMBINING MP4s")
+
 
     # Combines mp4s
     if conf.combine:

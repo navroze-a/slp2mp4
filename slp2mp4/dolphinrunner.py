@@ -52,14 +52,16 @@ class DolphinRunner:
         if tb is not None:
             return False
 
-    def count_frames_completed(self, slp_file):
+    def count_frames_completed(self, slp_file, frames_total):
         num_completed = 0
 
         if os.path.exists(self.render_time_file):
             with open(self.render_time_file, 'r') as f:
                 num_completed = len(list(f))
+        
+        percentage_completed = int(float(num_completed) / frames_total * 100)
 
-        print(slp_file, " - Rendered ",num_completed," frames")
+        print(slp_file, " - Rendered ",num_completed," frames (", percentage_completed , "% completed)")
         return num_completed
 
     def prep_dolphin_settings(self):
@@ -219,12 +221,12 @@ class DolphinRunner:
 
         # Sort framedumps by last modified time, then merge
         # Using glob because it gives full relative directory
-        framedumps = glob.glob(os.path.join(self.frames_dir, '*'))
+        framedumps = glob.glob(os.path.join(self.frames_dir, '*').replace(os.sep, '/'))
         framedumps.sort(key=os.path.getmtime)
 
         # Merges avi files
         ffmpeg_pat = 'concat:' + '|'.join(framedumps)
-        video_file = os.path.join(self.frames_dir, 'framedump.avi')
+        video_file = os.path.join(self.frames_dir, 'framedump.avi').replace(os.sep, '/')
         subprocess.run([self.ffmpeg, '-i', ffmpeg_pat, '-c', 'copy', video_file])
 
         return video_file, self.audio_file
@@ -257,11 +259,11 @@ class DolphinRunner:
             # Poll file until done
             # Since the Slippi doesn't quit on the "waiting for game" screen,
             # we need to poll to detect that we've finished
-            while self.count_frames_completed(slp_file) < num_frames:
+            while self.count_frames_completed(slp_file, num_frames) < num_frames:
                 # Check if process has been killed early
                 if proc_dolphin.poll() is not None:
                     break
-                time.sleep(1)
+                time.sleep(2)
 
             # Kill dolphin
             proc_dolphin.terminate()
