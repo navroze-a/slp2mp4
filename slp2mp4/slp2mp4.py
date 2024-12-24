@@ -5,7 +5,8 @@ import tempfile
 from pathlib import Path
 from collections import namedtuple
 
-from slippi import Game
+from peppi_py import read_slippi
+from peppi_py.game import Game
 import psutil
 import natsort
 
@@ -15,11 +16,17 @@ from ffmpegrunner import FfmpegRunner
 
 FPS = 60
 MIN_GAME_LENGTH = 30 * FPS
-DURATION_BUFFER = 70              # Record for 70 additional frames
+DURATION_BUFFER = 200              # Record for 200 additional frames (prevents death cutoffs in merge)
 
 ###############################################################################
 # Misc utils
 ###############################################################################
+def catch_err(func, *args):
+    try:
+        return func(*args)
+    except Exception as e:
+        return f"Error: {e}"
+    
 def is_game_too_short(num_frames, remove_short):
     return num_frames < MIN_GAME_LENGTH and remove_short
 
@@ -44,17 +51,19 @@ ToCombineObj = namedtuple('ToCombineObj', ['vids', 'outname'])
 # Evaluate whether file should be run. The open in dolphin and combine video and audio with ffmpeg.
 def record_file_slp(slp_file, outfile, conf):
     # Parse file with py-slippi to determine number of frames
-    slippi_game = Game(slp_file)
-    num_frames = slippi_game.metadata.duration + DURATION_BUFFER
+    print("Parsing slp: ", slp_file)
+    slippi_game = read_slippi(slp_file)
+    num_frames = slippi_game.metadata['lastFrame'] + DURATION_BUFFER
+    print(slp_file, " frame duration: ", num_frames)
 
-    if is_game_too_short(slippi_game.metadata.duration, conf.remove_short):
+    if is_game_too_short(slippi_game.metadata['lastFrame'], conf.remove_short):
         print("Warning: Game is less than 30 seconds and won't be recorded. Override in config.")
         return
 
     with tempfile.TemporaryDirectory() as tmpdir:
         with DolphinRunner(conf, conf.paths, tmpdir, uuid.uuid4()) as dolphin_runner:
             video_file, audio_file = dolphin_runner.run(slp_file, num_frames)
-
+            print("\nINFO :: FINISHED DOING DOLPHIN RUNNER FOR SLP: ", slp_file, "\n")
             # Encode
             ffmpeg_runner = FfmpegRunner(conf.ffmpeg)
             ffmpeg_runner.run(video_file, audio_file, outfile)
@@ -62,7 +71,7 @@ def record_file_slp(slp_file, outfile, conf):
             if conf.remove_slps:
                 safe_remove_file(slp_file)
 
-            print('Created {}'.format(outfile))
+            print('\nINFO :: Created {}\n'.format(outfile))
 
 def combine(mp4s, out, conf):
     # Creates concat file
@@ -85,6 +94,9 @@ def is_slp(slp):
 def get_mp4_name(slp):
     return '.'.join(os.path.splitext(slp)[:-1]) + '.mp4'
 
+# infiles = input slp dirs
+# outdir = output dir
+# conf = config
 def record_files(infiles, outdir, conf):
     file_mappings = [] # [SlpMp4Obj, ...]
     to_combine = []    # [ToCombineObj, ...]
@@ -103,18 +115,23 @@ def record_files(infiles, outdir, conf):
 
         # Directories get grouped/combined by level
         elif os.path.isdir(infile):
-            parent = Path(os.path.abspath(infile)).parts[-1]
+            parent = Path(os.path.abspath(infile)).parts[-1] # get parent path
+            print("Parent of infile: ", parent) 
             for subdir, _, fs in os.walk(infile):
                 cur_outdir = os.path.join(
                     outdir,
                     parent,
                     os.path.relpath(subdir, infile)
                 )
-                cur_combine = []
+                # Replace backslashes with forward slashes
+                cur_outdir = cur_outdir.replace(os.sep, '/')
+                print("cur_outdir=", cur_outdir)
+                cur_combine = [] # list of mp4s to be made in curr subdir
                 for f in fs:
                     if not is_slp(f):
                         continue
                     mp4_name = os.path.join(cur_outdir, get_mp4_name(f))
+                    # put (.slp, .mp4, conf) into a tuple (to be sent as args later)
                     file_mappings.append(SlpMp4Obj(os.path.join(subdir, f), mp4_name, conf))
                     cur_combine.append(mp4_name)
 
@@ -141,7 +158,7 @@ def record_files(infiles, outdir, conf):
     # Records mp4s
     num_processes = get_num_processes(conf)
     pool = multiprocessing.Pool(processes=num_processes)
-    pool.starmap(record_file_slp, file_mappings)
+    pool.starmap(catch_err, [(record_file_slp, *args) for args in file_mappings])
     pool.close()
 
     # Combines mp4s
@@ -181,6 +198,7 @@ def run(args):
     while True:
         try:
             conf = Config()
+            print("Successfully made default config from config.json!")
             break
         except RuntimeError as e:
             print(e, file=sys.stderr)
@@ -218,6 +236,7 @@ subparser = parser.add_subparsers(
 config_parser = subparser.add_parser('config', help='Run configuration helper')
 config_parser.set_defaults(func=config_script)
 
+# on slp2mp4.py run -> call run func & possibly have additional args (args.output_directory, args.path)
 run_parser = subparser.add_parser('run', help='Convert slps to mp4s')
 run_parser.set_defaults(func=run)
 run_parser.add_argument(

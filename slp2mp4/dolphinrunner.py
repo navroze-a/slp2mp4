@@ -52,14 +52,14 @@ class DolphinRunner:
         if tb is not None:
             return False
 
-    def count_frames_completed(self):
+    def count_frames_completed(self, slp_file):
         num_completed = 0
 
         if os.path.exists(self.render_time_file):
             with open(self.render_time_file, 'r') as f:
                 num_completed = len(list(f))
 
-        print("Rendered ",num_completed," frames")
+        print(slp_file, " - Rendered ",num_completed," frames")
         return num_completed
 
     def prep_dolphin_settings(self):
@@ -257,7 +257,7 @@ class DolphinRunner:
             # Poll file until done
             # Since the Slippi doesn't quit on the "waiting for game" screen,
             # we need to poll to detect that we've finished
-            while self.count_frames_completed() < num_frames:
+            while self.count_frames_completed(slp_file) < num_frames:
                 # Check if process has been killed early
                 if proc_dolphin.poll() is not None:
                     break
