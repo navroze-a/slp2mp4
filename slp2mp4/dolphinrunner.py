@@ -1,4 +1,5 @@
 import os, sys, subprocess, time, shutil, uuid, json, configparser
+import math
 import glob
 import pathlib
 
@@ -59,7 +60,7 @@ class DolphinRunner:
             with open(self.render_time_file, 'r') as f:
                 num_completed = len(list(f))
         
-        percentage_completed = int(float(num_completed) / frames_total * 100)
+        percentage_completed = int(math.floor(float(num_completed) / frames_total * 100))
 
         print(slp_file, " - Rendered ",num_completed," frames (", percentage_completed , "% completed)")
         return num_completed
@@ -254,7 +255,7 @@ class DolphinRunner:
                 ]
             print(' '.join(cmd))
             # TODO run faster than realtime if possible
-            proc_dolphin = subprocess.Popen(args=cmd)
+            proc_dolphin = subprocess.Popen(args=cmd, creationflags=subprocess.HIGH_PRIORITY_CLASS) # todo: set priority in config
 
             # Poll file until done
             # Since the Slippi doesn't quit on the "waiting for game" screen,

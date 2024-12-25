@@ -34,7 +34,7 @@ def is_game_too_short(num_frames, remove_short):
 
 def get_num_processes(conf):
     if conf.parallel_games == "recommended":
-        return psutil.cpu_count(logical=False)/2
+        return int(psutil.cpu_count(logical=False)/2)
     else:
         return int(conf.parallel_games)
 
@@ -192,6 +192,9 @@ def record_files(infiles, outdir, conf):
         # Removes created files (if need be)
         for _, mp4, _ in file_mappings:
             safe_remove_file(mp4)
+    
+    endCombineTime = timer()
+    print("INFO ::: TOOK ", float(endCombineTime-startProcessTime)/60, " minutes to process all ", len(file_mappings) ," slps to mp4 + combine mp4s")
 
 ###############################################################################
 # Argument parsing
